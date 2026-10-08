@@ -14,10 +14,20 @@ const supabase: SupabaseClient | null = SUPABASE_URL && SUPABASE_ANON_KEY ? crea
 const DEMO_KEY = '68668'
 const demoStorage = 'vault-five-demo'
 
+async function ensureAnonymousSession() {
+  if (!supabase) throw new Error('Realtime backend is not configured.')
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session) return session
+  const { data, error } = await supabase.auth.signInAnonymously()
+  if (error || !data.session) throw error ?? new Error('Could not start an anonymous game session.')
+  return data.session
+}
+
 const initialDemo: GameState = { roomCode: '7K4P', status: 'lobby', roundEndsAt: null, players: [] }
 
 async function api(action: string, body: Record<string, unknown>) {
   if (!supabase) throw new Error('Realtime backend is not configured.')
+  await ensureAnonymousSession()
   const { data, error } = await supabase.functions.invoke('game', { body: { action, ...body } })
   if (error) throw error
   if (data?.error) throw new Error(data.error)
@@ -28,7 +38,7 @@ function App() {
   const [screen, setScreen] = useState<Screen>('home')
   const [name, setName] = useState('')
   const [roomCode, setRoomCode] = useState('')
-  const [playerId, setPlayerId] = useState(() => crypto.randomUUID())
+  const [playerId, setPlayerId] = useState(() => localStorage.getItem('vault-five-player') || crypto.randomUUID())
   const [game, setGame] = useState<GameState>(() => JSON.parse(localStorage.getItem(demoStorage) || JSON.stringify(initialDemo)))
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -40,10 +50,21 @@ function App() {
 
   useEffect(() => {
     if (!supabase || !game.roomCode || demo) return
-    const channel = supabase.channel(`room:${game.roomCode}`)
-      .on('broadcast', { event: 'state' }, ({ payload }) => setGame(payload as GameState))
-      .subscribe()
-    return () => { void supabase.removeChannel(channel) }
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let cancelled = false
+    void (async () => {
+      try {
+        await ensureAnonymousSession()
+        await supabase.realtime.setAuth()
+        if (cancelled) return
+        channel = supabase.channel(`room:${game.roomCode}:state`, { config: { private: true } })
+          .on('broadcast', { event: 'state' }, ({ payload }) => setGame(payload as GameState))
+        channel.subscribe()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Realtime connection failed.')
+      }
+    })()
+    return () => { cancelled = true; if (channel) void supabase.removeChannel(channel) }
   }, [game.roomCode, demo])
 
   useEffect(() => {
@@ -54,8 +75,14 @@ function App() {
 
   useEffect(() => {
     if (!supabase || demo || !game.roomCode) return
-    void api('state', { roomCode: game.roomCode }).then((data) => { if (data?.game) setGame(data.game) }).catch(() => {})
+    void api('state', { roomCode: game.roomCode }).then((data) => { if (data?.roomCode) setGame(data as GameState) }).catch(() => {})
   }, [game.roomCode, demo])
+
+  useEffect(() => {
+    if (!supabase || demo || !game.roomCode || game.status === 'lobby' || game.status === 'result') return
+    const id = window.setInterval(() => { void api('tick', { roomCode: game.roomCode }).catch(() => {}) }, 2000)
+    return () => window.clearInterval(id)
+  }, [game.roomCode, game.status, demo])
 
   const me = game.players.find(p => p.id === playerId)
   const isHost = !!me?.isHost
@@ -66,14 +93,14 @@ function App() {
     setError('')
     if (!name.trim()) return setError('Enter a display name first.')
     if (!supabase) { const code = randomCode(); const player = { id: playerId, name: name.trim(), score: 0, connected: true, isHost: true }; updateDemo({ roomCode: code, status: 'lobby', roundEndsAt: null, players: [player] }); setRoomCode(code); setScreen('lobby'); return }
-    try { const data = await api('create', { name: name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); setGame({ roomCode:data.roomCode,status:'lobby',roundEndsAt:null,players:[{id:data.playerId,name:name.trim(),score:0,connected:true,isHost:true}] }); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not create the room.') }
+    try { const data = await api('create', { name: name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not create the room.') }
   }
   const joinGame = async () => {
     setError('')
     if (!name.trim()) return setError('Enter a display name first.')
     if (roomCode.trim().length !== 4) return setError('Enter the 4-character room code.')
     if (!supabase) { const next = { ...game, roomCode: roomCode.toUpperCase(), players: [...game.players, { id: playerId, name: name.trim(), score: 0, connected: true }] }; updateDemo(next); setScreen('lobby'); return }
-    try { const data = await api('join', { roomCode:roomCode.toUpperCase(), name:name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not join the room.') }
+    try { const data = await api('join', { roomCode:roomCode.toUpperCase(), name:name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not join the room.') }
   }
   const startGame = async () => {
     if (game.players.length < 2) return setError('At least two players are required to start.')
@@ -99,7 +126,11 @@ function App() {
     setScreen('result')
   }
 
-  const reset = () => {
+  const reset = async () => {
+    if (supabase && !demo) {
+      try { await api('replay', { roomCode: game.roomCode }); return }
+      catch (e) { setError(e instanceof Error ? e.message : 'Could not restart the game.'); return }
+    }
     const player = game.players.find(p => p.id === playerId)
     const next = { ...initialDemo, roomCode: game.roomCode, players: player ? [{ ...player, score: 0, submitted: false }] : [] }
     updateDemo(next); setScreen('lobby')
