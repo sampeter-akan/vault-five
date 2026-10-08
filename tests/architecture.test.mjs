@@ -10,7 +10,7 @@ test('frontend authenticates anonymously and invokes server function', () => {
 test('joining players persist active room for recovery', () => {
   assert.match(src, /localStorage\.setItem\(activeRoomStorage, data\.roomCode\)/)
 })
-test('schema uses per-room identity uniqueness', () => {
-  assert.match(schema, /players_room_auth_user_id_uidx/)
-  assert.doesNotMatch(schema, /create unique index if not exists players_auth_user_id_uidx/)
+test('schema declares row-level security', () => {
+  assert.match(schema, /alter table public.rooms enable row level security/)
+  assert.match(schema, /alter table public.players enable row level security/)
 })
