@@ -15,7 +15,7 @@ for (const target of targets) {
     ok = target.expected.includes(response.status);
     if (target.checkHtml && ok) {
       const html = await response.text();
-      ok = /<html[\\s>]/i.test(html) && /vault five/i.test(html);
+      ok = /<html[^>]*>/i.test(html) && /vault five/i.test(html);
       if (!ok) detail = 'HTML signature missing';
     }
     if (!ok && !detail) detail = 'Unexpected HTTP response';
@@ -25,7 +25,7 @@ for (const target of targets) {
   rows.push({ target: target.name, status, durationMs, result: ok ? 'PASS' : 'FAIL', detail });
   console.log(JSON.stringify(rows.at(-1)));
 }
-const markdown = ['## VAULT FIVE production synthetic check', '', '| Target | HTTP | Duration (ms) | Result |', '|---|---:|---:|---|', ...rows.map(r => `| ${r.target} | ${r.status} | ${r.durationMs} | ${r.result} |`), '', 'Checks are non-mutating. The protected API is expected to reject an unauthenticated request; this does not prove authenticated gameplay works.', 'Durations are individual external probes, not p95 or application-wide latency.'].join('\\n');
-if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown + '\\n');
-writeFileSync('synthetic-results.json', JSON.stringify({ checkedAt: new Date().toISOString(), results: rows }, null, 2) + '\\n');
+const markdown = ['## VAULT FIVE production synthetic check', '', '| Target | HTTP | Duration (ms) | Result |', '|---|---:|---:|---|', ...rows.map(r => `| ${r.target} | ${r.status} | ${r.durationMs} | ${r.result} |`), '', 'Checks are non-mutating. The protected API is expected to reject an unauthenticated request; this does not prove authenticated gameplay works.', 'Durations are individual external probes, not p95 or application-wide latency.'].join('\n');
+if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown + '\n');
+writeFileSync('synthetic-results.json', JSON.stringify({ checkedAt: new Date().toISOString(), results: rows }, null, 2) + '\n');
 if (failed) process.exitCode = 1;
