@@ -71,3 +71,11 @@ For an incident, compare a narrow UTC window before and after the error. Group f
 - Measure p95 latency, 5xx rates, room synchronization delay and Realtime reconnection success before proposing SLO thresholds.
 - Test simultaneous correct vault submissions and idempotent retries; validate winner arbitration under contention.
 - Configure Vercel deployment checks or branch protection if production must wait for green CI.
+
+## Automated synthetic monitoring (implemented)
+
+The [Production health workflow](../.github/workflows/production-health.yml) runs hourly and supports manual `workflow_dispatch`. It performs two **non-mutating** probes: the Vercel frontend must return HTTP 200 with recognizable HTML, and the protected Supabase `game` endpoint must reject an unauthenticated GET with HTTP 401/403. The script is [`scripts/synthetic-check.mjs`](../scripts/synthetic-check.mjs).
+
+Each execution writes a GitHub Actions job summary (status, one-off request duration, pass/fail) and uploads `synthetic-results.json` as a workflow artifact retained for 14 days. Failed probes fail the job. GitHub Actions scheduling is best-effort and can be delayed; this is not a minute-by-minute uptime guarantee. No paging notification has been configured. This is an external endpoint smoke test, not a real two-player session, full API availability metric, or p95 latency measurement.
+
+**Verify:** GitHub > Actions > Production health > Run workflow. Confirm the two checks and inspect the uploaded artifact. Do not call monitoring operational until a successful execution has been observed. If the protected endpoint responds differently because of gateway configuration, investigate before changing expected status codes.
