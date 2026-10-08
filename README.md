@@ -136,6 +136,9 @@ flowchart LR
 
 ## Observability and reliability
 
+**Operational runbook:** [Production checks, incident triage, log inspection and rollback](docs/OPERATIONS.md). This provides a repeatable two-client release checklist and separates currently available platform logs from metrics and alerts not yet implemented.
+
+
 The project currently uses **Supabase function/database logs and operational dashboards** plus Vercel deployment/build status for investigation. The database-request screenshot below shows platform-level activity; **it is not evidence of a custom metrics stack, latency SLO, or load test**.
 
 ![Supabase database requests — managed-platform request activity](docs/images/vault-five-db-requests.png)
