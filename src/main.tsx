@@ -144,7 +144,7 @@ function App() {
     if (!name.trim()) return setError('Enter a display name first.')
     if (roomCode.trim().length !== 4) return setError('Enter the 4-character room code.')
     if (!supabase) { const next = { ...game, roomCode: roomCode.toUpperCase(), players: [...game.players, { id: playerId, name: name.trim(), score: 0, connected: true }] }; updateDemo(next); setScreen('lobby'); return }
-    try { const data = await api('join', { roomCode:roomCode.toUpperCase(), name:name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not join the room.') }
+    try { const data = await api('join', { roomCode:roomCode.toUpperCase(), name:name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); localStorage.setItem(activeRoomStorage, data.roomCode); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not join the room.') }
   }
   const startGame = async () => {
     if (game.players.length < 2) return setError('At least two players are required to start.')
