@@ -251,7 +251,32 @@ function GameFrame({round,title,subtitle,timer,endsAt,children}:{round:string;ti
  useEffect(()=>{setLeft(remaining());const id=window.setInterval(()=>setLeft(remaining()),250);return()=>window.clearInterval(id)},[endsAt,timer])
  return <section className="game-page"><div className="game-meta"><span>ROUND {round}</span><span><span className="pulse"/> LIVE ROOM</span></div><div className="game-layout"><div className="game-copy"><div className="eyebrow"><Sparkles size={13}/> THE VAULT IS WATCHING</div><h2>{title}</h2><p>{subtitle}</p><div className={`timer ${left<=10?'urgent':''}`}><span>TIME REMAINING</span><strong>00:{String(left).padStart(2,'0')}</strong></div></div><div className="panel game-panel">{children}</div></div></section>
 }
-function Result({game,playerId,onReplay}:{game:GameState;playerId:string;onReplay:()=>void}) { const me=game.players.find(p=>p.id===playerId); return <section className="center-page"><div className="panel result"><div className={`result-lock ${game.vaultUnlocked?'unlocked':''}`}><LockKeyhole size={38}/></div><div className="eyebrow">{game.vaultUnlocked?'VAULT OPEN':'VAULT SECURED'}</div><h2>{game.vaultUnlocked?'JACKPOT':'Not this time.'}</h2><p>{game.vaultUnlocked?'The fictional prize has been unlocked.':'The vault stays closed. Play again and sharpen your deduction.'}</p>{game.vaultUnlocked&&<div className="prize"><small>FICTIONAL JACKPOT</small><strong>$1,000,000</strong><span>Safe box unlocked · no cash value</span></div>}<div className="score-row"><span>Your score</span><b>{me?.score ?? 0}</b></div><button className="primary full" onClick={onReplay}>Play again <RotateCcw size={17}/></button></div></section> }
+function Result({game,playerId,onReplay}:{game:GameState;playerId:string;onReplay:()=>void}) {
+ const me=game.players.find(p=>p.id===playerId)
+ const winner=game.players.find(p=>p.id===game.winnerId)
+ const ranked=[...game.players].sort((a,b)=>b.score-a.score || a.name.localeCompare(b.name))
+ const [celebrate,setCelebrate]=useState(false)
+ useEffect(()=>{
+   setCelebrate(false)
+   if (!game.vaultUnlocked) return
+   const id=window.setTimeout(()=>setCelebrate(true),120)
+   return ()=>window.clearTimeout(id)
+ },[game.vaultUnlocked,game.winnerId])
+ return <section className="center-page result-stage">
+ {game.vaultUnlocked&&<div className="celebration" aria-hidden="true">{Array.from({length:34},(_,i)=><i key={i} style={{left:`${(i*37)%100}%`,animationDelay:`${(i%11)*.13}s`,animationDuration:`${2.5+(i%5)*.35}s`}}/>)}</div>}
+ <div className={`panel result ${game.vaultUnlocked?'victory':''}`}>
+ <div className={`result-lock ${game.vaultUnlocked?'unlocked':''} ${celebrate?'vault-reveal':''}`}><LockKeyhole size={38}/></div>
+ <div className="eyebrow">{game.vaultUnlocked?'VAULT OPEN':'VAULT SECURED'}</div>
+ <h2>{game.vaultUnlocked?'JACKPOT':'Not this time.'}</h2>
+ <p>{game.vaultUnlocked ? (winner ? `${winner.name} cracked the vault!` : 'The vault has been unlocked!') : 'The vault stays closed. Play again and sharpen your deduction.'}</p>
+ {game.vaultUnlocked&&<div className="prize"><small>FICTIONAL JACKPOT</small><strong>$1,000,000</strong><span>No cash value · not redeemable</span></div>}
+ <div className="score-row"><span>Your score</span><b>{me?.score??0}</b></div>
+ <div className="leaderboard"><h3><Crown size={17}/> Final leaderboard</h3>
+ {ranked.map((p,i)=><div className={`leaderboard-player ${p.id===game.winnerId?'winner':''}`} key={p.id}><span className="rank">{i+1}</span><span className="leaderboard-name">{p.name}{p.id===playerId?' (You)':''}{p.id===game.winnerId&&<small>VAULT WINNER</small>}</span><strong>{p.score.toLocaleString()}</strong></div>)}
+ </div>
+ <button className="primary full" onClick={onReplay}>Play again <RotateCcw size={17}/></button>
+ </div></section>
+}
 
 function randomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:4},()=>chars[Math.floor(Math.random()*chars.length)]).join('')}
 
