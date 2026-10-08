@@ -1,0 +1,26 @@
+name: Production health
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check production endpoints
+        run: node scripts/synthetic-check.mjs
+      - name: Retain synthetic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-synthetic-results
+          path: synthetic-results.json
+          if-no-files-found: ignore
+          retention-days: 14
