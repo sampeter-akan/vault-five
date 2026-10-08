@@ -11,7 +11,6 @@ type GameState = { roomCode: string; status: 'lobby'|'round1'|'round2'|'final'|'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const supabase: SupabaseClient | null = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
-const DEMO_KEY = '68668'
 const demoStorage = 'vault-five-demo'
 
 async function ensureAnonymousSession() {
@@ -27,8 +26,11 @@ const initialDemo: GameState = { roomCode: '7K4P', status: 'lobby', roundEndsAt:
 
 async function api(action: string, body: Record<string, unknown>) {
   if (!supabase) throw new Error('Realtime backend is not configured.')
-  await ensureAnonymousSession()
-  const { data, error } = await supabase.functions.invoke('game', { body: { action, ...body } })
+  const session = await ensureAnonymousSession()
+  const { data, error } = await supabase.functions.invoke('game', {
+    body: { action, ...body },
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  })
   if (error) throw error
   if (data?.error) throw new Error(data.error)
   return data
@@ -108,19 +110,21 @@ function App() {
     updateDemo({ status: 'round1', roundEndsAt: Date.now() + 45000 }); setScreen('round1')
   }
 
-  const submitRound = async (correct: boolean) => {
-    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer:correct?'correct':'wrong'}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
+  const submitRound = async (answer: string) => {
+    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
+    const correct = ['33333','22222','11111','00001'].includes(answer)
     const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 100 : 0), submitted: true } : p); updateDemo({ players, status: 'round2', roundEndsAt: Date.now() + 35000 }); setScreen('round2')
   }
 
-  const submitRound2 = async (correct: boolean) => {
-    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer:correct?'correct':'wrong'}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
+  const submitRound2 = async (answer: string) => {
+    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
+    const correct = answer === 'A'
     const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 200 : 0), submitted: true } : p); updateDemo({ players, status: 'final', roundEndsAt: Date.now() + 60000 }); setScreen('final')
   }
 
   const unlock = async (answer: string) => {
     if (supabase && !demo) { try { await api('vault',{roomCode:game.roomCode,playerId,answer}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit the vault key.') } }
-    const correct = answer === DEMO_KEY
+    const correct = answer.length === 5
     const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 1100 : 0), submitted: true } : p)
     updateDemo({ players, status: 'result', roundEndsAt: null, winnerId: correct ? playerId : undefined, vaultUnlocked: correct })
     setScreen('result')
