@@ -53,6 +53,7 @@ function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [demo, setDemo] = useState(!supabase)
+  const [syncIssue, setSyncIssue] = useState(false)
 
   useEffect(() => {
     if (!supabase) return
@@ -105,12 +106,24 @@ function App() {
 
   useEffect(() => {
     if (!supabase || demo || !game.roomCode || !localStorage.getItem(activeRoomStorage) || game.status === 'result') return
-    const id = window.setInterval(() => {
-      void api('tick', { roomCode: game.roomCode }).then(() => api('state', { roomCode: game.roomCode })).then(state => {
-        if (state?.roomCode) setGame(state as GameState)
-      }).catch(() => {})
-    }, 2000)
-    return () => window.clearInterval(id)
+    let cancelled = false
+    let busy = false
+    const refresh = async () => {
+      if (busy || cancelled) return
+      busy = true
+      try {
+        const state = await api('state', { roomCode: game.roomCode })
+        if (!cancelled && state?.roomCode) {
+          setGame(state as GameState)
+          setSyncIssue(false)
+        }
+      } catch {
+        if (!cancelled) setSyncIssue(true)
+      } finally { busy = false }
+    }
+    void refresh()
+    const id = window.setInterval(() => { void refresh() }, 2000)
+    return () => { cancelled = true; window.clearInterval(id) }
   }, [game.roomCode, game.status, demo])
 
   const me = game.players.find(p => p.id === playerId)
@@ -174,6 +187,7 @@ function App() {
       <div className="top-status"><span className={`status-dot ${supabase && !demo ? 'live' : 'demo'}`} /> {supabase && !demo ? 'LIVE SERVER' : 'LOCAL PLAY MODE'}</div>
     </header>
 
+    {syncIssue && <div className="error" role="status">Connection interrupted. Reconnecting to the room…</div>}
     <main>
       {screen === 'home' && <Home onCreate={() => setScreen('create')} onJoin={() => setScreen('join')} onHow={() => setScreen('howto')} />}
       {screen === 'create' && <NameCard title="Create a game" subtitle="Start a room and share the code with your friends." name={name} setName={setName} error={error} onBack={() => setScreen('home')} action={createGame} actionText="Create my game" />}
