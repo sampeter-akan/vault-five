@@ -22,15 +22,22 @@ Screenshots supplied with this project: `vault-five-landing-page.png`, `vault-fi
 
 ```mermaid
 flowchart LR
-  A["Browser A · React/Vite"] -->|HTTPS · JWT| E["Supabase Edge Function · game"]
-  B["Browser B · React/Vite"] -->|HTTPS · JWT| E
-  A <-->|Realtime WebSocket · private room channel| R["Supabase Realtime"]
-  B <-->|Realtime WebSocket · private room channel| R
-  E -->|Privileged server-side queries| P[("Supabase PostgreSQL")]
-  E -->|Room-state broadcast| R
-  A -->|Anonymous session| U["Supabase Auth"]
-  B -->|Anonymous session| U
-  V["Vercel · static frontend"] -.-> A
+  A["Browser A - React and Vite"]
+  B["Browser B - React and Vite"]
+  E["Supabase Edge Function"]
+  R["Supabase Realtime"]
+  P[("Supabase PostgreSQL")]
+  U["Supabase Auth"]
+  V["Vercel static hosting"]
+  A -->|"HTTPS JWT"| E
+  B -->|"HTTPS JWT"| E
+  A <-->|"Private Realtime channel"| R
+  B <-->|"Private Realtime channel"| R
+  E -->|"Database queries"| P
+  E -->|"State broadcasts"| R
+  A -->|"Anonymous auth"| U
+  B -->|"Anonymous auth"| U
+  V -.-> A
   V -.-> B
 ```
 
@@ -96,8 +103,8 @@ flowchart LR
   L --> T["Node smoke tests"]
   T --> B["Production build"]
   B --> M{"Merge to main?"}
-  M -->|No| PR["Review / Vercel preview when enabled"]
-  M -->|Yes| D["Vercel Git integration"]
+  M -->|"No"| PR["Review / Vercel preview when enabled"]
+  M -->|"Yes"| D["Vercel Git integration"]
   D --> PROD["Production deployment"]
 ```
 
