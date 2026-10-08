@@ -12,6 +12,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const supabase: SupabaseClient | null = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
 const demoStorage = 'vault-five-demo'
+const activeRoomStorage = 'vault-five-active-room'
 
 async function ensureAnonymousSession() {
   if (!supabase) throw new Error('Realtime backend is not configured.')
@@ -31,7 +32,14 @@ async function api(action: string, body: Record<string, unknown>) {
     body: { action, ...body },
     headers: { Authorization: `Bearer ${session.access_token}` },
   })
-  if (error) throw error
+  if (error) {
+    const response = (error as { context?: Response }).context
+    if (response && typeof response.json === 'function') {
+      const details = await response.json().catch(() => null)
+      throw new Error(details?.error || error.message)
+    }
+    throw error
+  }
   if (data?.error) throw new Error(data.error)
   return data
 }
@@ -47,11 +55,26 @@ function App() {
   const [demo, setDemo] = useState(!supabase)
 
   useEffect(() => {
+    if (!supabase) return
+    const saved = localStorage.getItem(activeRoomStorage)
+    if (!saved) return
+    let cancelled = false
+    void api('state', { roomCode: saved }).then((state) => {
+      if (cancelled || !state?.roomCode) return
+      setRoomCode(state.roomCode)
+      setGame(state as GameState)
+    }).catch(() => {
+      if (!cancelled) localStorage.removeItem(activeRoomStorage)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
     localStorage.setItem(demoStorage, JSON.stringify(game))
   }, [game])
 
   useEffect(() => {
-    if (!supabase || !game.roomCode || demo) return
+    if (!supabase || !game.roomCode || demo || !localStorage.getItem(activeRoomStorage)) return
     let channel: ReturnType<typeof supabase.channel> | null = null
     let cancelled = false
     void (async () => {
@@ -72,17 +95,21 @@ function App() {
   useEffect(() => {
     if (demo) return
     const next: Record<GameState['status'], Screen> = { lobby:'lobby', round1:'round1', round2:'round2', final:'final', result:'result' }
-    setScreen(next[game.status])
+    if (localStorage.getItem(activeRoomStorage)) setScreen(next[game.status])
   }, [game.status, demo])
 
   useEffect(() => {
-    if (!supabase || demo || !game.roomCode) return
+    if (!supabase || demo || !game.roomCode || !localStorage.getItem(activeRoomStorage)) return
     void api('state', { roomCode: game.roomCode }).then((data) => { if (data?.roomCode) setGame(data as GameState) }).catch(() => {})
   }, [game.roomCode, demo])
 
   useEffect(() => {
-    if (!supabase || demo || !game.roomCode || game.status === 'lobby' || game.status === 'result') return
-    const id = window.setInterval(() => { void api('tick', { roomCode: game.roomCode }).catch(() => {}) }, 2000)
+    if (!supabase || demo || !game.roomCode || !localStorage.getItem(activeRoomStorage) || game.status === 'result') return
+    const id = window.setInterval(() => {
+      void api('tick', { roomCode: game.roomCode }).then(() => api('state', { roomCode: game.roomCode })).then(state => {
+        if (state?.roomCode) setGame(state as GameState)
+      }).catch(() => {})
+    }, 2000)
     return () => window.clearInterval(id)
   }, [game.roomCode, game.status, demo])
 
@@ -95,7 +122,7 @@ function App() {
     setError('')
     if (!name.trim()) return setError('Enter a display name first.')
     if (!supabase) { const code = randomCode(); const player = { id: playerId, name: name.trim(), score: 0, connected: true, isHost: true }; updateDemo({ roomCode: code, status: 'lobby', roundEndsAt: null, players: [player] }); setRoomCode(code); setScreen('lobby'); return }
-    try { const data = await api('create', { name: name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not create the room.') }
+    try { const data = await api('create', { name: name.trim() }); setPlayerId(data.playerId); setRoomCode(data.roomCode); localStorage.setItem('vault-five-player', data.playerId); localStorage.setItem(activeRoomStorage, data.roomCode); setGame(data as GameState); setDemo(false); setScreen('lobby') } catch(e) { setError(e instanceof Error ? e.message : 'Could not create the room.') }
   }
   const joinGame = async () => {
     setError('')
@@ -106,12 +133,12 @@ function App() {
   }
   const startGame = async () => {
     if (game.players.length < 2) return setError('At least two players are required to start.')
-    if (supabase && !demo) { try { await api('start',{roomCode:game.roomCode,playerId}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not start the game.') } }
+    if (supabase && !demo) { try { await api('start',{roomCode:game.roomCode,playerId}); const state = await api('state',{roomCode:game.roomCode}); setGame(state as GameState); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not start the game.') } }
     updateDemo({ status: 'round1', roundEndsAt: Date.now() + 45000 }); setScreen('round1')
   }
 
   const submitRound = async (answer: string) => {
-    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
+    if (supabase && !demo) { try { await api('round',{roomCode:game.roomCode,playerId,answer}); const state = await api('state',{roomCode:game.roomCode}); setGame(state as GameState); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit.') } }
     const correct = ['33333','22222','11111','00001'].includes(answer)
     const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 100 : 0), submitted: true } : p); updateDemo({ players, status: 'round2', roundEndsAt: Date.now() + 35000 }); setScreen('round2')
   }
@@ -123,7 +150,7 @@ function App() {
   }
 
   const unlock = async (answer: string) => {
-    if (supabase && !demo) { try { await api('vault',{roomCode:game.roomCode,playerId,answer}); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit the vault key.') } }
+    if (supabase && !demo) { try { await api('vault',{roomCode:game.roomCode,playerId,answer}); const state = await api('state',{roomCode:game.roomCode}); setGame(state as GameState); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit the vault key.') } }
     const correct = answer.length === 5
     const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 1100 : 0), submitted: true } : p)
     updateDemo({ players, status: 'result', roundEndsAt: null, winnerId: correct ? playerId : undefined, vaultUnlocked: correct })
@@ -132,7 +159,7 @@ function App() {
 
   const reset = async () => {
     if (supabase && !demo) {
-      try { await api('replay', { roomCode: game.roomCode }); return }
+      try { await api('replay', { roomCode: game.roomCode }); const state = await api('state',{roomCode:game.roomCode}); setGame(state as GameState); return }
       catch (e) { setError(e instanceof Error ? e.message : 'Could not restart the game.'); return }
     }
     const player = game.players.find(p => p.id === playerId)
@@ -153,9 +180,9 @@ function App() {
       {screen === 'join' && <JoinCard roomCode={roomCode} setRoomCode={setRoomCode} name={name} setName={setName} error={error} onBack={() => setScreen('home')} action={joinGame} />}
       {screen === 'howto' && <HowTo onBack={() => setScreen('home')} />}
       {screen === 'lobby' && <Lobby game={game} isHost={isHost} onStart={startGame} onHow={() => setScreen('howto')} onCopy={() => { navigator.clipboard?.writeText(game.roomCode); setNotice('Room code copied.') }} error={error} notice={notice} />}
-      {screen === 'round1' && <RoundOne onSubmit={submitRound} />}
-      {screen === 'round2' && <RoundTwo onSubmit={submitRound2} />}
-      {screen === 'final' && <FinalVault onUnlock={unlock} />}
+      {screen === 'round1' && <RoundOne onSubmit={submitRound} endsAt={game.roundEndsAt} />}
+      {screen === 'round2' && <RoundTwo onSubmit={submitRound2} endsAt={game.roundEndsAt} />}
+      {screen === 'final' && <FinalVault onUnlock={unlock} endsAt={game.roundEndsAt} />}
       {screen === 'result' && <Result game={game} playerId={playerId} onReplay={reset} />}
     </main>
     <footer><span>Fictional game experience · No real-money prizes</span><span>VAULT FIVE / 01</span></footer>
@@ -178,10 +205,15 @@ function Rule({n,title,text}:{n:string;title:string;text:string}) {return <div c
 
 function Lobby({game,isHost,onStart,onHow,onCopy,error,notice}:{game:GameState;isHost:boolean;onStart:()=>void;onHow:()=>void;onCopy:()=>void;error:string;notice:string}) { return <section className="center-page"><div className="panel lobby"><div className="lobby-head"><div><div className="eyebrow">YOUR ROOM</div><h2>{game.roomCode}</h2><p>Share this code. Friends can join from any phone or laptop.</p></div><button className="copy" onClick={onCopy}><Copy size={16}/> Copy</button></div><div className="players-head"><span>PLAYERS</span><b>{game.players.length}/8</b></div><div className="player-list">{game.players.map((p,i)=><div className="player" key={p.id}><span className="avatar">{p.name.slice(0,1).toUpperCase()}</span><span>{p.name}{p.isHost&&<small>HOST</small>}</span><i>{p.isHost?<Crown size={15}/>:<span className="ready-dot"/>}</i></div>)}{Array.from({length:Math.max(0,2-game.players.length)}).map((_,i)=><div className="player waiting" key={i}><span className="avatar">?</span><span>Waiting for player...</span><i><span className="pulse"/></i></div>)}</div>{error&&<div className="error"><X size={15}/>{error}</div>}{notice&&<div className="notice"><Check size={15}/>{notice}</div>}<div className="lobby-actions">{isHost ? <button className="primary full" onClick={onStart}>Start game <ArrowRight size={17}/></button> : <div className="waiting-host"><span className="pulse"/> Waiting for the host to start…</div>}<button className="text-button" onClick={onHow}>Review rules</button></div></div></section> }
 
-function RoundOne({onSubmit}:{onSubmit:(answer:string)=>void}) { const [pick,setPick]=useState(''); return <GameFrame round="01" title="Find the signal" subtitle="One of these outputs is the first clue. Choose the value that belongs to the vault sequence." timer={45}><div className="signal-grid">{['55555','44444','33333','22222','11111','00001'].map(v=><button key={v} className={`signal ${pick===v?'selected':''}`} onClick={()=>setPick(v)}><small>OUTPUT</small><strong>{v}</strong></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
-function RoundTwo({onSubmit}:{onSubmit:(answer:string)=>void}) { const [pick,setPick]=useState(''); return <GameFrame round="02" title="Read the pattern" subtitle="The first clue narrows the field. Now choose the pair that advances the hidden key." timer={35}><div className="choice-stack">{[['A','33 · 22'],['B','55 · 44'],['C','11 · 00']].map(([a,b])=><button key={a} className={`big-choice ${pick===a?'selected':''}`} onClick={()=>setPick(a)}><span>{a}</span><strong>{b}</strong><ArrowRight size={18}/></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
-function FinalVault({onUnlock}:{onUnlock:(a:string)=>void}) { const [digits,setDigits]=useState(''); return <GameFrame round="FINAL" title="The vault is ready." subtitle="Enter the five-digit safe-box combination. One answer. One unlock." timer={60}><div className="vault-input"><div className="digits">{Array.from({length:5}).map((_,i)=><span key={i}>{digits[i]||'•'}</span>)}</div><div className="keypad">{['1','2','3','4','5','6','7','8','9','0'].map(d=><button key={d} onClick={()=>digits.length<5&&setDigits(digits+d)}>{d}</button>)}<button className="clear" onClick={()=>setDigits('')}><RotateCcw size={17}/></button></div></div><button disabled={digits.length!==5} className="primary full" onClick={()=>onUnlock(digits)}>Unlock vault <LockKeyhole size={17}/></button></GameFrame> }
-function GameFrame({round,title,subtitle,timer,children}:{round:string;title:string;subtitle:string;timer:number;children:React.ReactNode}) { const [left,setLeft]=useState(timer); useEffect(()=>{const id=setInterval(()=>setLeft(x=>Math.max(0,x-1)),1000);return()=>clearInterval(id)},[]); return <section className="game-page"><div className="game-meta"><span>ROUND {round}</span><span><span className="pulse"/> LIVE ROOM</span></div><div className="game-layout"><div className="game-copy"><div className="eyebrow"><Sparkles size={13}/> THE VAULT IS WATCHING</div><h2>{title}</h2><p>{subtitle}</p><div className={`timer ${left<=10?'urgent':''}`}><span>TIME REMAINING</span><strong>00:{String(left).padStart(2,'0')}</strong></div></div><div className="panel game-panel">{children}</div></div></section> }
+function RoundOne({onSubmit,endsAt}:{onSubmit:(answer:string)=>void;endsAt:number|null}) { const [pick,setPick]=useState(''); return <GameFrame round="01" title="Find the signal" subtitle="One of these outputs is the first clue. Choose the value that belongs to the vault sequence." timer={45} endsAt={endsAt}><div className="signal-grid">{['55555','44444','33333','22222','11111','00001'].map(v=><button key={v} className={`signal ${pick===v?'selected':''}`} onClick={()=>setPick(v)}><small>OUTPUT</small><strong>{v}</strong></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
+function RoundTwo({onSubmit,endsAt}:{onSubmit:(answer:string)=>void;endsAt:number|null}) { const [pick,setPick]=useState(''); return <GameFrame round="02" title="Read the pattern" subtitle="The first clue narrows the field. Now choose the pair that advances the hidden key." timer={35} endsAt={endsAt}><div className="choice-stack">{[['A','33 · 22'],['B','55 · 44'],['C','11 · 00']].map(([a,b])=><button key={a} className={`big-choice ${pick===a?'selected':''}`} onClick={()=>setPick(a)}><span>{a}</span><strong>{b}</strong><ArrowRight size={18}/></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
+function FinalVault({onUnlock,endsAt}:{onUnlock:(a:string)=>void;endsAt:number|null}) { const [digits,setDigits]=useState(''); return <GameFrame round="FINAL" title="The vault is ready." subtitle="Enter the five-digit safe-box combination. One answer. One unlock." timer={60} endsAt={endsAt}><div className="vault-input"><div className="digits">{Array.from({length:5}).map((_,i)=><span key={i}>{digits[i]||'•'}</span>)}</div><div className="keypad">{['1','2','3','4','5','6','7','8','9','0'].map(d=><button key={d} onClick={()=>digits.length<5&&setDigits(digits+d)}>{d}</button>)}<button className="clear" onClick={()=>setDigits('')}><RotateCcw size={17}/></button></div></div><button disabled={digits.length!==5} className="primary full" onClick={()=>onUnlock(digits)}>Unlock vault <LockKeyhole size={17}/></button></GameFrame> }
+function GameFrame({round,title,subtitle,timer,endsAt,children}:{round:string;title:string;subtitle:string;timer:number;endsAt:number|null;children:React.ReactNode}) {
+ const remaining = () => Math.max(0,Math.ceil(((endsAt ?? (Date.now()+timer*1000))-Date.now())/1000))
+ const [left,setLeft]=useState(remaining)
+ useEffect(()=>{setLeft(remaining());const id=window.setInterval(()=>setLeft(remaining()),250);return()=>window.clearInterval(id)},[endsAt,timer])
+ return <section className="game-page"><div className="game-meta"><span>ROUND {round}</span><span><span className="pulse"/> LIVE ROOM</span></div><div className="game-layout"><div className="game-copy"><div className="eyebrow"><Sparkles size={13}/> THE VAULT IS WATCHING</div><h2>{title}</h2><p>{subtitle}</p><div className={`timer ${left<=10?'urgent':''}`}><span>TIME REMAINING</span><strong>00:{String(left).padStart(2,'0')}</strong></div></div><div className="panel game-panel">{children}</div></div></section>
+}
 function Result({game,playerId,onReplay}:{game:GameState;playerId:string;onReplay:()=>void}) { const me=game.players.find(p=>p.id===playerId); return <section className="center-page"><div className="panel result"><div className={`result-lock ${game.vaultUnlocked?'unlocked':''}`}><LockKeyhole size={38}/></div><div className="eyebrow">{game.vaultUnlocked?'VAULT OPEN':'VAULT SECURED'}</div><h2>{game.vaultUnlocked?'JACKPOT':'Not this time.'}</h2><p>{game.vaultUnlocked?'The fictional prize has been unlocked.':'The vault stays closed. Play again and sharpen your deduction.'}</p>{game.vaultUnlocked&&<div className="prize"><small>FICTIONAL JACKPOT</small><strong>$1,000,000</strong><span>Safe box unlocked · no cash value</span></div>}<div className="score-row"><span>Your score</span><b>{me?.score ?? 0}</b></div><button className="primary full" onClick={onReplay}>Play again <RotateCcw size={17}/></button></div></section> }
 
 function randomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:4},()=>chars[Math.floor(Math.random()*chars.length)]).join('')}
