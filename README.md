@@ -16,7 +16,23 @@ The interesting engineering problem is not rendering a game: it is making indepe
 - **Game:** shared timed rounds with server-validated submissions.
 - **Outcome:** winner announcement, per-player leaderboard, vault celebration, and replay.
 
-Screenshots supplied with this project: `vault-five-landing-page.png`, `vault-five-the-rules.png`, `vault-five-cracked-vault.png`, and `vault-five-db-requests.png`. The supplied ZIP is not yet published as repository image assets; see **Screenshot publishing** below. This README deliberately does not use broken image links or pretend the assets have been uploaded.
+### Landing experience
+
+![VAULT FIVE landing page — browser-based entry to room hosting and joining](docs/images/vault-five-landing-page.png)
+
+*Figure 1 — Public-facing entry point. Players access the application in a browser and can create or join multiplayer rooms without installing software or completing a visible registration form.*
+
+### Game rules and player onboarding
+
+![VAULT FIVE game rules — timed rounds and player instructions](docs/images/vault-five-the-rules.png)
+
+*Figure 2 — In-app rules introduce the round structure and player actions. Clear instructions reduce ambiguity when multiple clients interact with the same timed server-side state machine.*
+
+### Successful unlock and synchronized outcome
+
+![VAULT FIVE cracked vault — jackpot announcement and results](docs/images/vault-five-cracked-vault.png)
+
+*Figure 3 — Successful vault-unlock outcome. The winner announcement and leaderboard are generated from the authoritative room state and displayed to connected players; the jackpot is fictional and has no cash value.*
 
 ## Architecture
 
@@ -120,7 +136,11 @@ flowchart LR
 
 ## Observability and reliability
 
-The project currently uses **Supabase function/database logs and operational dashboards** plus Vercel deployment/build status for investigation. The supplied `vault-five-db-requests.png` is a screenshot of database request activity; **it is not evidence of a custom metrics stack, latency SLO, or load test**.
+The project currently uses **Supabase function/database logs and operational dashboards** plus Vercel deployment/build status for investigation. The database-request screenshot below shows platform-level activity; **it is not evidence of a custom metrics stack, latency SLO, or load test**.
+
+![Supabase database requests — managed-platform request activity](docs/images/vault-five-db-requests.png)
+
+*Figure 4 — Supabase database-request view used as operational context. Request activity helps orient investigation, but does not by itself measure end-to-end application latency, WebSocket connection counts, or availability.*
 
 | Signal | Where to inspect now | Current limitation / next instrument |
 |---|---|---|
@@ -177,15 +197,9 @@ These are development/test incidents observed during live multi-browser validati
 - **Security awareness:** anonymous identity, room-scoped authorization, RLS, server-side scoring and secret isolation, with explicit remaining abuse controls.
 - **Engineering honesty:** documented gaps around load testing, instrumentation, containers, deployment gating, and full recovery verification.
 
-## Screenshot publishing
+## Documentation assets
 
-The user-provided ZIP contains four PNGs:
-- `vault-five-landing-page.png` — product entry point and host/join experience
-- `vault-five-the-rules.png` — round instructions and scoring presentation
-- `vault-five-cracked-vault.png` — successful unlock, named winner, and final leaderboard
-- `vault-five-db-requests.png` — Supabase database request activity (platform telemetry, not an application SLO dashboard)
-
-Once these images are committed under `docs/images/`, embed them as `![Landing page](docs/images/vault-five-landing-page.png)` etc. The image ZIP was inspected while preparing this README, but binary screenshot upload is not claimed here.
+The four screenshots shown above are versioned in [`docs/images/`](docs/images/) alongside this README. Relative Markdown image paths allow GitHub to render them directly from the repository, keeping the product walkthrough and operational evidence close to the engineering documentation.
 
 ---
 
