@@ -54,6 +54,8 @@ function App() {
   const [notice, setNotice] = useState('')
   const [demo, setDemo] = useState(!supabase)
   const [syncIssue, setSyncIssue] = useState(false)
+  const [vaultFeedback, setVaultFeedback] = useState('')
+  const [vaultBusy, setVaultBusy] = useState(false)
 
   useEffect(() => {
     if (!supabase) return
@@ -163,11 +165,24 @@ function App() {
   }
 
   const unlock = async (answer: string) => {
-    if (supabase && !demo) { try { await api('vault',{roomCode:game.roomCode,playerId,answer}); const state = await api('state',{roomCode:game.roomCode}); setGame(state as GameState); return } catch(e){ return setError(e instanceof Error ? e.message : 'Could not submit the vault key.') } }
-    const correct = answer.length === 5
-    const players = game.players.map(p => p.id === playerId ? { ...p, score: p.score + (correct ? 1100 : 0), submitted: true } : p)
-    updateDemo({ players, status: 'result', roundEndsAt: null, winnerId: correct ? playerId : undefined, vaultUnlocked: correct })
-    setScreen('result')
+    if (vaultBusy) return
+    setError('')
+    setVaultFeedback('')
+    setVaultBusy(true)
+    try {
+      if (supabase && !demo) {
+        const response = await api('vault', { roomCode: game.roomCode, playerId, answer })
+        const state = await api('state', { roomCode: game.roomCode })
+        if (state?.roomCode) setGame(state as GameState)
+        setVaultFeedback(response?.correct ? 'Vault unlocked! Winner confirmed.' : 'Combination received. Incorrect code — the vault remains locked.')
+        return
+      }
+      setVaultFeedback('Local demo mode cannot validate a live vault key.')
+    } catch (e) {
+      setVaultFeedback(e instanceof Error ? e.message : 'Unable to submit. Please try again.')
+    } finally {
+      setVaultBusy(false)
+    }
   }
 
   const reset = async () => {
@@ -196,7 +211,7 @@ function App() {
       {screen === 'lobby' && <Lobby game={game} isHost={isHost} onStart={startGame} onHow={() => setScreen('howto')} onCopy={() => { navigator.clipboard?.writeText(game.roomCode); setNotice('Room code copied.') }} error={error} notice={notice} />}
       {screen === 'round1' && <RoundOne onSubmit={submitRound} endsAt={game.roundEndsAt} />}
       {screen === 'round2' && <RoundTwo onSubmit={submitRound2} endsAt={game.roundEndsAt} />}
-      {screen === 'final' && <FinalVault onUnlock={unlock} endsAt={game.roundEndsAt} />}
+      {screen === 'final' && <FinalVault onUnlock={unlock} endsAt={game.roundEndsAt} feedback={vaultFeedback} busy={vaultBusy} />}
       {screen === 'result' && <Result game={game} playerId={playerId} onReplay={reset} />}
     </main>
     <footer><span>Fictional game experience · No real-money prizes</span><span>VAULT FIVE / 01</span></footer>
@@ -221,7 +236,15 @@ function Lobby({game,isHost,onStart,onHow,onCopy,error,notice}:{game:GameState;i
 
 function RoundOne({onSubmit,endsAt}:{onSubmit:(answer:string)=>void;endsAt:number|null}) { const [pick,setPick]=useState(''); return <GameFrame round="01" title="Find the signal" subtitle="One of these outputs is the first clue. Choose the value that belongs to the vault sequence." timer={45} endsAt={endsAt}><div className="signal-grid">{['55555','44444','33333','22222','11111','00001'].map(v=><button key={v} className={`signal ${pick===v?'selected':''}`} onClick={()=>setPick(v)}><small>OUTPUT</small><strong>{v}</strong></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
 function RoundTwo({onSubmit,endsAt}:{onSubmit:(answer:string)=>void;endsAt:number|null}) { const [pick,setPick]=useState(''); return <GameFrame round="02" title="Read the pattern" subtitle="The first clue narrows the field. Now choose the pair that advances the hidden key." timer={35} endsAt={endsAt}><div className="choice-stack">{[['A','33 · 22'],['B','55 · 44'],['C','11 · 00']].map(([a,b])=><button key={a} className={`big-choice ${pick===a?'selected':''}`} onClick={()=>setPick(a)}><span>{a}</span><strong>{b}</strong><ArrowRight size={18}/></button>)}</div><button disabled={!pick} className="primary full" onClick={()=>onSubmit(pick)}>Lock in <Check size={17}/></button></GameFrame> }
-function FinalVault({onUnlock,endsAt}:{onUnlock:(a:string)=>void;endsAt:number|null}) { const [digits,setDigits]=useState(''); return <GameFrame round="FINAL" title="The vault is ready." subtitle="Enter the five-digit safe-box combination. One answer. One unlock." timer={60} endsAt={endsAt}><div className="vault-input"><div className="digits">{Array.from({length:5}).map((_,i)=><span key={i}>{digits[i]||'•'}</span>)}</div><div className="keypad">{['1','2','3','4','5','6','7','8','9','0'].map(d=><button key={d} onClick={()=>digits.length<5&&setDigits(digits+d)}>{d}</button>)}<button className="clear" onClick={()=>setDigits('')}><RotateCcw size={17}/></button></div></div><button disabled={digits.length!==5} className="primary full" onClick={()=>onUnlock(digits)}>Unlock vault <LockKeyhole size={17}/></button></GameFrame> }
+function FinalVault({onUnlock,endsAt,feedback,busy}:{onUnlock:(a:string)=>void;endsAt:number|null;feedback:string;busy:boolean}) {
+ const [digits,setDigits]=useState('')
+ return <GameFrame round="FINAL" title="The vault is ready." subtitle="Enter the five-digit safe-box combination. One answer. One unlock." timer={60} endsAt={endsAt}>
+ <div className="vault-input"><div className="digits">{Array.from({length:5}).map((_,i)=><span key={i}>{digits[i]||'•'}</span>)}</div>
+ <div className="keypad">{['1','2','3','4','5','6','7','8','9','0'].map(d=><button key={d} disabled={busy} onClick={()=>digits.length<5&&setDigits(digits+d)}>{d}</button>)}<button className="clear" disabled={busy} onClick={()=>setDigits('')}><RotateCcw size={17}/></button></div></div>
+ <button disabled={digits.length!==5||busy} className="primary full" onClick={()=>onUnlock(digits)}>{busy?'Checking combination…':'Unlock vault'} <LockKeyhole size={17}/></button>
+ {feedback&&<div className="notice" role="status" aria-live="polite">{feedback}</div>}
+ </GameFrame>
+}
 function GameFrame({round,title,subtitle,timer,endsAt,children}:{round:string;title:string;subtitle:string;timer:number;endsAt:number|null;children:React.ReactNode}) {
  const remaining = () => Math.max(0,Math.ceil(((endsAt ?? (Date.now()+timer*1000))-Date.now())/1000))
  const [left,setLeft]=useState(remaining)
